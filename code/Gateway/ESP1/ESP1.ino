@@ -10,6 +10,7 @@
 #include <vector>
 #include <math.h>
 #include <stdarg.h>
+#include <time.h>
 
 // Mirror the hardware serial output into an in-memory log so the web UI can show a live Raw View terminal.
 class MirroredSerial : public Print {
@@ -131,6 +132,10 @@ unsigned long lastDiagTimer = 0;
 unsigned long lastWifiTry = 0;
 unsigned long lastMqttAttempt = 0;
 unsigned long rebootAt = 0;
+bool wifiWasConnected = false;
+
+// A Unix time below this threshold (roughly 2024-01-01) means SNTP hasn't synced yet.
+static constexpr time_t MIN_VALID_EPOCH = 1704067200;
 
 static constexpr size_t MAX_TRAFFIC_LOG = 30;
 static constexpr size_t MAX_WORKING_NODES = 48;
@@ -138,6 +143,7 @@ static constexpr size_t MAX_TRAFFIC_TEXT = 480;
 
 struct TrafficEntry {
   unsigned long atMs;
+  time_t atEpoch;  // Real time when captured, or 0 if SNTP was off/not synced yet.
   String source;
   String status;
   String nodeId;
@@ -148,6 +154,7 @@ struct TrafficEntry {
 
 struct WorkingNodeEntry {
   unsigned long atMs;
+  time_t atEpoch;  // Real time when captured, or 0 if SNTP was off/not synced yet.
   String source;
   String status;
   String nodeId;
@@ -189,6 +196,47 @@ String formatUptime(unsigned long ms) {
   char buffer[40];
   snprintf(buffer, sizeof(buffer), "%lud %02lu:%02lu:%02lu", days, hours, minutes, seconds);
   return String(buffer);
+}
+
+// Always false when SNTP is disabled, so callers don't need a separate settings.ntpEnabled check.
+bool timeIsSynced() {
+  return settings.ntpEnabled && time(nullptr) >= MIN_VALID_EPOCH;
+}
+
+// Kick off (or restart) SNTP sync using the configured server and UTC offset. No-op when disabled.
+void configureTime() {
+  if (!settings.ntpEnabled) {
+    return;
+  }
+  configTime(static_cast<long>(settings.utcOffsetMinutes) * 60, 0, settings.ntpServer);
+}
+
+String formatCurrentTime() {
+  if (!settings.ntpEnabled) {
+    return "Disabled";
+  }
+  if (!timeIsSynced()) {
+    return "Not synced";
+  }
+  time_t now = time(nullptr);
+  struct tm timeinfo;
+  localtime_r(&now, &timeinfo);
+  char buffer[24];
+  strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S", &timeinfo);
+  return String(buffer);
+}
+
+// Formats when an event was received: real wall-clock time if SNTP was enabled and synced when the
+// event was captured, otherwise the uptime-relative clock (see formatTrafficTime) as a fallback.
+String formatEventTime(unsigned long atMs, time_t atEpoch) {
+  if (atEpoch >= MIN_VALID_EPOCH) {
+    struct tm timeinfo;
+    localtime_r(&atEpoch, &timeinfo);
+    char buffer[20];
+    strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S", &timeinfo);
+    return String(buffer);
+  }
+  return formatTrafficTime(atMs);
 }
 
 bool hasConfiguredWifi() {
@@ -248,7 +296,7 @@ String formatJsonPretty(const String& raw) {
   return pretty;
 }
 
-void updateWorkingNode(const String& source, const String& raw, const String& status, int rssi, const String& nodeId) {
+void updateWorkingNode(const String& source, const String& raw, const String& status, int rssi, const String& nodeId, time_t atEpoch) {
   if (nodeId.isEmpty()) {
     return;
   }
@@ -262,6 +310,7 @@ void updateWorkingNode(const String& source, const String& raw, const String& st
 
   WorkingNodeEntry entry;
   entry.atMs = millis();
+  entry.atEpoch = atEpoch;
   entry.source = source;
   entry.status = status;
   entry.nodeId = nodeId;
@@ -284,8 +333,11 @@ void updateWorkingNode(const String& source, const String& raw, const String& st
 
 // Store the most recent parsed payloads for the Monitoring page.
 void pushTrafficEntry(const String& source, const String& raw, const String& status, int rssi, const String& nodeId = "") {
+  time_t atEpoch = timeIsSynced() ? time(nullptr) : 0;
+
   TrafficEntry entry;
   entry.atMs = millis();
+  entry.atEpoch = atEpoch;
   entry.source = source;
   entry.status = status;
   entry.nodeId = nodeId;
@@ -297,7 +349,7 @@ void pushTrafficEntry(const String& source, const String& raw, const String& sta
     trafficLog.erase(trafficLog.begin());
   }
   trafficLog.push_back(entry);
-  updateWorkingNode(source, entry.raw, status, rssi, nodeId);
+  updateWorkingNode(source, entry.raw, status, rssi, nodeId, atEpoch);
 }
 
 // When normal WiFi is missing or broken, expose a local setup AP so the web UI stays reachable.
@@ -786,6 +838,18 @@ void printActiveConfig() {
   Serial.print(F("Connected: "));
   Serial.println(client.connected() ? F("yes") : F("no"));
 
+  Serial.println(F("[Time]"));
+  Serial.print(F("SNTP: "));
+  Serial.println(settings.ntpEnabled ? F("enabled") : F("disabled"));
+  Serial.print(F("NTP Server: "));
+  Serial.println(settings.ntpServer);
+  Serial.print(F("UTC Offset (min): "));
+  Serial.println(settings.utcOffsetMinutes);
+  Serial.print(F("Synced: "));
+  Serial.println(timeIsSynced() ? F("yes") : F("no"));
+  Serial.print(F("Current Time: "));
+  Serial.println(formatCurrentTime());
+
   Serial.println(F("[Gateway]"));
   Serial.print(F("Gateway KEY: "));
   Serial.println(settings.gatewayKey);
@@ -848,6 +912,8 @@ void handleGetStatus() {
   doc["wifiRssi"] = WiFi.status() == WL_CONNECTED ? String(WiFi.RSSI()) + " dBm" : "Unavailable";
   doc["freeHeap"] = ESP.getFreeHeap();
   doc["uptime"] = formatUptime(millis());
+  doc["timeSynced"] = timeIsSynced();
+  doc["currentTime"] = formatCurrentTime();
   doc["firmwareVersion"] = FIRMWARE_VERSION;
   doc["settingsSource"] = settingsSourceLabel();
   sendJsonResponse(200, doc);
@@ -862,7 +928,7 @@ void handleGetTraffic() {
   JsonArray items = doc.createNestedArray("items");
   for (const auto& entry : trafficLog) {
     JsonObject item = items.createNestedObject();
-    item["time"] = formatTrafficTime(entry.atMs);
+    item["time"] = formatEventTime(entry.atMs, entry.atEpoch);
     item["source"] = entry.source;
     item["status"] = entry.status;
     item["nodeId"] = entry.nodeId;
@@ -879,7 +945,7 @@ void handleGetTraffic() {
   JsonArray nodes = doc.createNestedArray("nodes");
   for (const auto& entry : workingNodes) {
     JsonObject node = nodes.createNestedObject();
-    node["time"] = formatTrafficTime(entry.atMs);
+    node["time"] = formatEventTime(entry.atMs, entry.atEpoch);
     node["ageSeconds"] = (millis() - entry.atMs) / 1000;
     node["source"] = entry.source;
     node["status"] = entry.status;
@@ -1008,8 +1074,14 @@ void maintainWifi() {
     if (accessPointActive) {
       stopConfigPortal();
     }
+    if (!wifiWasConnected) {
+      configureTime();
+    }
+    wifiWasConnected = true;
     return;
   }
+
+  wifiWasConnected = false;
 
   if (!accessPointActive) {
     startConfigPortal();
@@ -1034,6 +1106,11 @@ void setup() {
 
   setup_wifi();
   setupWebServer();
+
+  if (WiFi.status() == WL_CONNECTED) {
+    configureTime();
+    wifiWasConnected = true;
+  }
 
   client.setBufferSize(2048);
   client.setCallback(callback);

@@ -24,6 +24,12 @@
 #define MQTT_PORT 1883
 #define DISCOVERY_EVERY_PACKET true  // False sends discovery once per boot.
 
+//////////////////////////////////// SNTP //////////////////////////////////////
+
+#define NTP_ENABLED false                   // Off by default. Enable if you need real timestamps or MQTT TLS.
+#define NTP_SERVER "pool.ntp.org"           // Time source for SNTP sync.
+#define UTC_OFFSET_MINUTES 0                // Offset from UTC in minutes (-720..840). Add DST manually if needed.
+
 ////////////////////////////// LORA DEFAULTS //////////////////////////////////
 
 // Bandwidth vs SF support (SX126x):

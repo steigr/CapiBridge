@@ -131,6 +131,9 @@ void setDefaultSettings(GatewaySettings& settings) {
   copyStringField(settings.mqttPassword, sizeof(settings.mqttPassword), MQTT_PASSWORD);
   copyStringField(settings.mqttServer, sizeof(settings.mqttServer), MQTT_SERVER);
   settings.mqttPort = MQTT_PORT;
+  settings.ntpEnabled = NTP_ENABLED;
+  copyStringField(settings.ntpServer, sizeof(settings.ntpServer), NTP_SERVER);
+  settings.utcOffsetMinutes = UTC_OFFSET_MINUTES;
   settings.discoveryEveryPacket = DISCOVERY_EVERY_PACKET;
   settings.loraModule = LORA_MODULE;
   settings.band = BAND;
@@ -158,6 +161,16 @@ bool validateSettings(const GatewaySettings& settings, String& error) {
 
   if (settings.mqttPort == 0) {
     error = "MQTT port must be greater than 0.";
+    return false;
+  }
+
+  if (settings.ntpEnabled && strlen(settings.ntpServer) == 0) {
+    error = "NTP server cannot be empty.";
+    return false;
+  }
+
+  if (settings.utcOffsetMinutes < -720 || settings.utcOffsetMinutes > 840) {
+    error = "UTC offset must be between -720 and 840 minutes.";
     return false;
   }
 
@@ -241,6 +254,9 @@ void settingsToJson(const GatewaySettings& settings, JsonDocument& doc, bool inc
   doc["mqttPassword"] = includeSecrets ? settings.mqttPassword : "********";
   doc["mqttServer"] = settings.mqttServer;
   doc["mqttPort"] = settings.mqttPort;
+  doc["ntpEnabled"] = settings.ntpEnabled;
+  doc["ntpServer"] = settings.ntpServer;
+  doc["utcOffsetMinutes"] = settings.utcOffsetMinutes;
   doc["discoveryEveryPacket"] = settings.discoveryEveryPacket;
   doc["loraModule"] = settings.loraModule;
   doc["loraModuleLabel"] = getLoRaModuleLabel(settings.loraModule);
@@ -284,6 +300,15 @@ bool settingsFromJson(const JsonDocument& doc, GatewaySettings& settings, String
   }
   if (doc["mqttPort"].is<int>()) {
     updated.mqttPort = doc["mqttPort"].as<uint16_t>();
+  }
+  if (doc["ntpEnabled"].is<bool>()) {
+    updated.ntpEnabled = doc["ntpEnabled"].as<bool>();
+  }
+  if (doc["ntpServer"].is<const char*>()) {
+    copyStringField(updated.ntpServer, sizeof(updated.ntpServer), doc["ntpServer"]);
+  }
+  if (doc["utcOffsetMinutes"].is<int>()) {
+    updated.utcOffsetMinutes = doc["utcOffsetMinutes"].as<int16_t>();
   }
   if (doc["discoveryEveryPacket"].is<bool>()) {
     updated.discoveryEveryPacket = doc["discoveryEveryPacket"].as<bool>();
