@@ -30,8 +30,10 @@ static const char WEB_UI_HTML[] PROGMEM = R"rawliteral(
     .sidebar-footer{margin-top:auto;padding:12px;border-top:1px solid var(--border-primary)}
     .theme-toggle{display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:var(--bg-tertiary);border-radius:6px;border:1px solid var(--border-primary)}
     .theme-label{font-size:calc(12px * var(--ui-font-scale));color:var(--text-secondary);display:flex;align-items:center;gap:6px}.theme-label svg{width:14px;height:14px}
-    .toggle-sw{width:40px;height:22px;background:var(--bg-card);border-radius:11px;cursor:pointer;position:relative;border:2px solid var(--border-primary);transition:all .3s}.toggle-sw::after{content:'';position:absolute;width:14px;height:14px;background:var(--accent-primary);border-radius:50%;top:2px;left:2px;transition:transform .3s}
-    [data-theme="dark"] .toggle-sw::after{transform:translateX(18px)}
+    .theme-mode-text{text-transform:capitalize}
+    .toggle-sw{width:58px;height:22px;background:var(--bg-card);border-radius:11px;cursor:pointer;position:relative;border:2px solid var(--border-primary);transition:all .3s}.toggle-sw::after{content:'';position:absolute;width:14px;height:14px;background:var(--accent-primary);border-radius:50%;top:2px;left:2px;transition:transform .3s}
+    .toggle-sw[data-mode="system"]::after{transform:translateX(18px)}
+    .toggle-sw[data-mode="dark"]::after{transform:translateX(36px)}
     .mobile-menu{display:none;position:fixed;top:12px;left:12px;z-index:200;width:36px;height:36px;background:var(--bg-secondary);border:1px solid var(--border-primary);border-radius:8px;cursor:pointer;align-items:center;justify-content:center}.mobile-menu svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:2;color:var(--text-primary)}
     .sidebar-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:99}.sidebar-overlay.active{display:block}
     .main{flex:1;margin-left:240px;padding:20px;min-height:100vh}
@@ -73,7 +75,7 @@ static const char WEB_UI_HTML[] PROGMEM = R"rawliteral(
         <a class="nav-item" data-page="settings" href="#/settings" onclick="navigateTo('settings');return false;"><svg viewBox="0 0 24 24"><path d="M12 15.5A3.5 3.5 0 1 0 12 8.5a3.5 3.5 0 0 0 0 7Z"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82"/></svg>Settings</a>
         <a class="nav-item" data-page="info" href="#/info" onclick="navigateTo('info');return false;"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>Help</a>
       </nav>
-      <div class="sidebar-footer"><div class="theme-toggle"><span class="theme-label"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10Zm0-1.5v-17a8.5 8.5 0 1 1 0 17Z"/></svg>Theme</span><div class="toggle-sw" onclick="toggleTheme()"></div></div></div>
+      <div class="sidebar-footer"><div class="theme-toggle"><span class="theme-label"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10Zm0-1.5v-17a8.5 8.5 0 1 1 0 17Z"/></svg><span class="theme-mode-text" id="themeModeText">System</span></span><div class="toggle-sw" id="themeToggleSw" data-mode="system" title="Click to cycle: Light / System / Dark" onclick="cycleThemeMode()"></div></div></div>
     </aside>
     <main class="main">
       <!-- Status page: connection health, radio details, and maintenance actions. -->
@@ -161,9 +163,27 @@ static const char WEB_UI_HTML[] PROGMEM = R"rawliteral(
     function applyUiScale(scale){const safe=Number(scale)||1;document.documentElement.style.setProperty('--ui-font-scale',String(safe));if(uiTextScale)uiTextScale.value=String(safe)}
     function applyAccentColor(color){const rgb=hexToRgb(color);const theme=document.documentElement.getAttribute('data-theme')==='dark'?'dark':'light';const base=rgb?rgbToHex(rgb.r,rgb.g,rgb.b):defaultAccentColor;const parsed=hexToRgb(base);document.documentElement.style.setProperty('--accent-primary',base);document.documentElement.style.setProperty('--accent-secondary',shiftColor(base,-28));document.documentElement.style.setProperty('--accent-glow',`rgba(${parsed.r},${parsed.g},${parsed.b},${theme==='dark'?0.16:0.14})`);if(uiAccentColor)uiAccentColor.value=base}
     function applyUiPreferences(){const savedScale=localStorage.getItem('capibridge-ui-font-scale')||'1.08';const savedAccent=localStorage.getItem('capibridge-ui-accent')||defaultAccentColor;applyUiScale(savedScale);applyAccentColor(savedAccent)}
-    function toggleTheme(){const current=document.documentElement.getAttribute('data-theme')==='dark'?'light':'dark';document.documentElement.setAttribute('data-theme',current);localStorage.setItem('capibridge-theme',current);applyUiPreferences()}
-    const savedTheme=localStorage.getItem('capibridge-theme');if(savedTheme)document.documentElement.setAttribute('data-theme',savedTheme)
-    applyUiPreferences()
+    const themeToggleSw=document.getElementById('themeToggleSw');
+    const themeModeText=document.getElementById('themeModeText');
+    const themeModeOrder=['light','system','dark'];
+    const systemThemeQuery=window.matchMedia?window.matchMedia('(prefers-color-scheme: light)'):null;
+    function resolveSystemTheme(){return systemThemeQuery&&systemThemeQuery.matches?'light':'dark'}
+    function applyThemeMode(mode){
+      const resolved=mode==='system'?resolveSystemTheme():mode;
+      document.documentElement.setAttribute('data-theme',resolved);
+      if(themeToggleSw)themeToggleSw.dataset.mode=mode;
+      if(themeModeText)themeModeText.textContent=mode;
+      applyUiPreferences();
+    }
+    function cycleThemeMode(){
+      const current=localStorage.getItem('capibridge-theme-mode')||'system';
+      const next=themeModeOrder[(themeModeOrder.indexOf(current)+1)%themeModeOrder.length];
+      localStorage.setItem('capibridge-theme-mode',next);
+      applyThemeMode(next);
+    }
+    const initialThemeMode=localStorage.getItem('capibridge-theme-mode')||localStorage.getItem('capibridge-theme')||'system';
+    applyThemeMode(initialThemeMode);
+    if(systemThemeQuery)systemThemeQuery.addEventListener('change',()=>{if((localStorage.getItem('capibridge-theme-mode')||'system')==='system')applyThemeMode('system')});
 
     function showMessage(target,text,isError){target.textContent=text;target.className='message '+(isError?'error':'success');target.style.display='block'}
     function clearMessage(target){target.style.display='none';target.textContent='';target.className='message'}
