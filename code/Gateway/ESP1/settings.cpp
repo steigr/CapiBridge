@@ -131,6 +131,7 @@ void setDefaultSettings(GatewaySettings& settings) {
   copyStringField(settings.mqttPassword, sizeof(settings.mqttPassword), MQTT_PASSWORD);
   copyStringField(settings.mqttServer, sizeof(settings.mqttServer), MQTT_SERVER);
   settings.mqttPort = MQTT_PORT;
+  settings.mqttUseTls = MQTT_USE_TLS;
   settings.ntpEnabled = NTP_ENABLED;
   copyStringField(settings.ntpServer, sizeof(settings.ntpServer), NTP_SERVER);
   settings.utcOffsetMinutes = UTC_OFFSET_MINUTES;
@@ -254,6 +255,7 @@ void settingsToJson(const GatewaySettings& settings, JsonDocument& doc, bool inc
   doc["mqttPassword"] = includeSecrets ? settings.mqttPassword : "********";
   doc["mqttServer"] = settings.mqttServer;
   doc["mqttPort"] = settings.mqttPort;
+  doc["mqttUseTls"] = settings.mqttUseTls;
   doc["ntpEnabled"] = settings.ntpEnabled;
   doc["ntpServer"] = settings.ntpServer;
   doc["utcOffsetMinutes"] = settings.utcOffsetMinutes;
@@ -300,6 +302,9 @@ bool settingsFromJson(const JsonDocument& doc, GatewaySettings& settings, String
   }
   if (doc["mqttPort"].is<int>()) {
     updated.mqttPort = doc["mqttPort"].as<uint16_t>();
+  }
+  if (doc["mqttUseTls"].is<bool>()) {
+    updated.mqttUseTls = doc["mqttUseTls"].as<bool>();
   }
   if (doc["ntpEnabled"].is<bool>()) {
     updated.ntpEnabled = doc["ntpEnabled"].as<bool>();

@@ -20,8 +20,9 @@
 
 #define MQTT_USERNAME "test"
 #define MQTT_PASSWORD "test123"
-#define MQTT_SERVER "192.168.99.2"
-#define MQTT_PORT 1883
+#define MQTT_SERVER "192.168.99.2"          // Hostname or IP; DNS resolution works when a hostname is used.
+#define MQTT_PORT 1883                      // Use 8883 when MQTT_USE_TLS is true.
+#define MQTT_USE_TLS false                  // Server-only TLS (no client cert) validated against Let's Encrypt's CA.
 #define DISCOVERY_EVERY_PACKET true  // False sends discovery once per boot.
 
 //////////////////////////////////// SNTP //////////////////////////////////////

@@ -7,7 +7,7 @@
 
 // Persistent settings are stored as one validated blob in ESP32 Preferences.
 static constexpr uint32_t SETTINGS_MAGIC = 0x43424944;  // CBID
-static constexpr uint16_t SETTINGS_VERSION = 2;
+static constexpr uint16_t SETTINGS_VERSION = 3;
 static constexpr uint8_t SETTINGS_MAX_KEY_LENGTH = 16;
 
 // This struct is the runtime source of truth for every editable gateway setting.
@@ -25,6 +25,7 @@ struct GatewaySettings {
   char mqttPassword[65];
   char mqttServer[65];
   uint16_t mqttPort;
+  bool mqttUseTls;
   bool ntpEnabled;
   char ntpServer[65];
   int16_t utcOffsetMinutes;

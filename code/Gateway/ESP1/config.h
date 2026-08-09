@@ -10,6 +10,10 @@
 // All other settings can be changed later from the Web UI at:
 // http://<CapiBridge-ip>/
 
+// MQTT TLS support (WiFiClientSecure/mbedTLS) no longer fits the default 1.2MB app
+// partition. In Arduino IDE: Tools > Partition Scheme > pick a scheme with a bigger
+// APP slot, e.g. "Minimal SPIFFS (1.9MB APP with OTA/128KB SPIFFS)".
+
 ///////////////////////////////////////////////////////////////////////////////
 
 //#define LORA_MODULE LORA_MODULE_SX1276    // Ra-01 433 Ra-01H 868/915Mhz "SX1276" Module (orders shipped before Aug 2025)

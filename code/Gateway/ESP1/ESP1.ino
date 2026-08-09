@@ -2,8 +2,10 @@
 #include "settings.h"
 #include "radio.h"
 #include "web_ui.h"
+#include "letsencrypt_ca.h"
 #include <SPI.h>
 #include <WiFi.h>
+#include <WiFiClientSecure.h>
 #include <PubSubClient.h>
 #include <WebServer.h>
 #include <ArduinoJson.h>
@@ -65,6 +67,13 @@ class MirroredSerial : public Print {
 volatile bool packetReceived = false;
 void onReceive() { packetReceived = true; }
 
+// The Arduino core's main loop task only gets 8KB of stack by default, which isn't enough
+// for a WiFiClientSecure/mbedTLS TLS handshake (runs inline from reconnectMqtt() in loop()) -
+// it overflows and panics/reboots. This weak override (esp32 core's main.cpp) raises it.
+size_t getArduinoLoopTaskStackSize(void) {
+  return 16384;
+}
+
 #define LED_PIN 2
 #define BAUD 115200
 #define RXPIN 18
@@ -87,6 +96,7 @@ GatewaySettings settings;
 SettingsStore settingsStore;
 WebServer server(80);
 WiFiClient espClient;
+WiFiClientSecure espClientSecure;
 PubSubClient client(espClient);
 std::vector<String> publishedDiscovery;
 
@@ -431,18 +441,15 @@ void callback(char* incomingTopic, byte* payload, unsigned int length) {
   }
 }
 
-// Reconnect to the broker with a retry delay, and re-subscribe to the command topic on success.
-void reconnectMqtt() {
-  if (client.connected() || WiFi.status() != WL_CONNECTED || !hasConfiguredMqtt()) {
-    return;
-  }
+// DNS resolution and TCP/TLS connect are all synchronous/blocking calls inside PubSubClient::connect().
+// If the broker's hostname doesn't resolve (or the broker is unreachable), that block can run for
+// several seconds - long enough to make the web UI feel unresponsive, since it shares the main loop
+// task with WebServer::handleClient(). Running the connect attempt on its own task keeps loop() free.
+volatile bool mqttConnectInProgress = false;
 
-  if (millis() - lastMqttAttempt < 5000) {
-    return;
-  }
-
-  lastMqttAttempt = millis();
+void mqttConnectTask(void* pvParameters) {
   client.setBufferSize(2048);
+  client.setClient(settings.mqttUseTls ? static_cast<Client&>(espClientSecure) : static_cast<Client&>(espClient));
   client.setServer(settings.mqttServer, settings.mqttPort);
   client.setCallback(callback);
 
@@ -462,6 +469,33 @@ void reconnectMqtt() {
   } else {
     Serial.print("MQTT failed, rc=");
     Serial.println(client.state());
+  }
+
+  mqttConnectInProgress = false;
+  vTaskDelete(NULL);
+}
+
+// Kick off a reconnect attempt on a background task with a retry delay; abandons early (returns
+// immediately) whenever a connect is already running, so the caller (loop()) never blocks on it.
+void reconnectMqtt() {
+  if (client.connected() || mqttConnectInProgress || WiFi.status() != WL_CONNECTED || !hasConfiguredMqtt()) {
+    return;
+  }
+
+  // A TLS handshake needs a correct clock to validate the broker cert's validity window.
+  if (settings.mqttUseTls && settings.ntpEnabled && !timeIsSynced()) {
+    return;
+  }
+
+  if (millis() - lastMqttAttempt < 5000) {
+    return;
+  }
+
+  lastMqttAttempt = millis();
+  mqttConnectInProgress = true;
+  if (xTaskCreate(mqttConnectTask, "mqttConnect", 16384, nullptr, 1, nullptr) != pdPASS) {
+    Serial.println("Failed to start MQTT connect task");
+    mqttConnectInProgress = false;
   }
 }
 
@@ -835,6 +869,8 @@ void printActiveConfig() {
   Serial.println(settings.mqttUsername);
   Serial.print(F("Password: "));
   Serial.println(settings.mqttPassword);
+  Serial.print(F("TLS: "));
+  Serial.println(settings.mqttUseTls ? F("enabled (server-only, Let's Encrypt CA)") : F("disabled"));
   Serial.print(F("Connected: "));
   Serial.println(client.connected() ? F("yes") : F("no"));
 
@@ -1104,6 +1140,8 @@ void setup() {
   setDefaultSettings(settings);
   settingsStore.load(settings);
 
+  espClientSecure.setCACert(LETSENCRYPT_ROOT_CA);
+
   setup_wifi();
   setupWebServer();
 
@@ -1252,8 +1290,12 @@ void loop() {
 
   maintainWifi();
   reconnectMqtt();
-  client.loop();
-  diag();
-  SendESPNOWCommands();
-  SendLoRaCommands();
+  // Skip touching the client while mqttConnectTask is mid-connect on another task - PubSubClient
+  // isn't safe to use concurrently from two tasks.
+  if (!mqttConnectInProgress) {
+    client.loop();
+    diag();
+    SendESPNOWCommands();
+    SendLoRaCommands();
+  }
 }
