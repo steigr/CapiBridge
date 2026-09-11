@@ -214,20 +214,15 @@ bool validateSettings(const GatewaySettings& settings, String& error) {
       return false;
     }
   } else {
-    if (settings.loraSpreadingFactor < 5 || settings.loraSpreadingFactor > 11) {
-      error = "SX1262/SX1268 support spreading factor 5 to 11.";
+    // RadioLib's SX126x driver supports SF5-12 at any bandwidth and auto-computes Low Data
+    // Rate Optimization (ldroAuto), so there's no hardware reason to cap SF lower at narrower
+    // bandwidths - that's a real range/sensitivity tradeoff for the user to choose, not ours.
+    if (settings.loraSpreadingFactor < 5 || settings.loraSpreadingFactor > 12) {
+      error = "SX1262/SX1268 support spreading factor 5 to 12.";
       return false;
     }
     if (settings.loraTxPower < -9 || settings.loraTxPower > 22) {
       error = "SX1262/SX1268 TX power must be between -9 and 22 dBm.";
-      return false;
-    }
-    if (settings.loraSignalBandwidth == 125.0f && settings.loraSpreadingFactor > 9) {
-      error = "At 125 kHz, SX126x supports spreading factor up to 9.";
-      return false;
-    }
-    if (settings.loraSignalBandwidth == 250.0f && settings.loraSpreadingFactor > 10) {
-      error = "At 250 kHz, SX126x supports spreading factor up to 10.";
       return false;
     }
   }

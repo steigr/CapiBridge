@@ -1281,6 +1281,16 @@ void loop() {
     } else {
       Serial.print("readData() error ");
       Serial.println(state);
+
+      if (state == RADIOLIB_ERR_CRC_MISMATCH) {
+        String raw;
+        for (size_t i = 0; i < len; i++) {
+          char hex[3];
+          snprintf(hex, sizeof(hex), "%02X", buf[i]);
+          raw += hex;
+        }
+        pushTrafficEntry("LoRa", raw, "crc_error", static_cast<int>(lround(radio.getRSSI())));
+      }
     }
   }
 
